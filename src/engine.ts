@@ -148,7 +148,7 @@ export const addDays = (d: string, n: number) => fromMs(toMs(d) + n * DAY)
 
 /** Settlement date: T+2 business days, T+1 for trades on/after 2024-05-27 (Canadian move to T+1). */
 export function settlementDate(trade: string): string {
-  // skips weekends only, not exchange holidays; matters only for the last days of December.
+  // Skips weekends only, not exchange holidays; matters only for the last days of December.
   let left = trade >= '2024-05-27' ? 1 : 2
   let d = trade
   while (left > 0) {
