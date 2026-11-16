@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { autoMap, detectFormat, importRows, importStatement, ledgerCsv, parseCsv, parseDate, parseNum, schedule3Csv, txKey, txsToCsv, TEMPLATE_EXAMPLE, type ImportOptions } from './csv.ts'
+import { autoMap, detectFormat, importRows, importStatement, ledgerCsv, normKind, statementFileInfo, parseCsv, parseDate, parseNum, schedule3Csv, txKey, txsToCsv, TEMPLATE_EXAMPLE, type ImportOptions } from './csv.ts'
 import { computeAcb } from './engine.ts'
 import { WS_ACTIVITIES_CSV, WS_STATEMENT_CSV } from './samples.ts'
 import { lookupFrom, parseValet, rateOn, uncovered, withGaps } from './fx.ts'
@@ -128,4 +128,56 @@ test('txKey spots a re-imported row', () => {
   const a = importRows(rows, autoMap(rows[0]), opts).txs
   const b = importRows(rows, autoMap(rows[0]), opts).txs
   assert.equal(new Set([...a, ...b].map(txKey)).size, a.length)
+})
+
+// Layout of the newer Activities export (effective_date + effective_time + a description column), as seen in
+// public Wealthsimple converters. Values are made up; columns and codes follow the real file.
+const WS_ACTIVITIES_V2 = `effective_date,effective_time,settlement_date,account_id,account_type,activity_type,activity_sub_type,description,direction,symbol,name,currency,quantity,unit_price,commission,net_cash_amount
+2026-09-10,15:30:00,2026-09-11,HQ7AB12CAD,Non-registered margin,Trade,BUY,Bought 100 shares,LONG,XDIV,iShares Core MSCI Canadian Quality Dividend Index ETF,CAD,100,39.48,0,-3948.00
+2026-09-12,09:31:02,2026-09-15,HQ7AB12USD,Non-registered margin,Trade,SELL,Sold 80 shares,LONG,ZM,Zoom Video Communications Inc,USD,-80,90.04,0,7203.20
+2026-09-15,10:00:00,,HQ1CC33CAD,Chequing,BonusPayment,CASHBACK,Cash back,,,,CAD,137.5,,,137.5
+2026-09-16,12:00:00,2026-09-17,HQ7AB12USD,Non-registered margin,Trade,BUYTOOPEN,Bought 2 contracts,LONG,SPY 450.00 USD CALL 2026-10-16,SPDR S&P 500 call,USD,2,3.20,1.50,-641.50
+2026-09-20,00:00:00,,HQ7AB12CAD,Non-registered margin,CorporateAction,STKREORG,Reorganization,,XDIV,iShares Core MSCI Canadian Quality Dividend Index ETF,CAD,100,,,
+`
+
+test('newer Activities export layout: effective_date, margin accounts, description column', () => {
+  const rows = parseCsv(WS_ACTIVITIES_V2)
+  assert.equal(detectFormat(rows[0]), 'ws-activities')
+  const m = autoMap(rows[0])
+  assert.equal(rows[0][m.date!], 'effective_date')
+  assert.equal(rows[0][m.name!], 'name') // not the free-text description
+  const { txs, skipped } = importRows(rows, m, opts)
+  assert.deepEqual(txs.map((t) => [t.date, t.symbol, t.kind, t.quantity, t.price, t.currency, t.accountType, t.account]), [
+    ['2026-09-10', 'XDIV', 'buy', 100, 39.48, 'CAD', 'Non-registered', 'HQ7AB12CAD'],
+    ['2026-09-12', 'ZM', 'sell', 80, 90.04, 'USD', 'Non-registered', 'HQ7AB12USD'],
+  ])
+  assert.equal(skipped.length, 3)
+  assert.match(skipped[1].reason, /^option trade/)
+  assert.match(skipped[2].reason, /^corporate action/)
+})
+
+test('option legs are never read as share trades', () => {
+  for (const s of ['BUYTOOPEN', 'SELLTOCLOSE', 'BUY_TO_CLOSE', 'sell to open', 'OPTIONEXPIRY']) assert.equal(normKind(s), null, s)
+  assert.equal(normKind('BUY'), 'buy')
+  assert.equal(normKind('Stock split'), 'split')
+})
+
+test('statement file name gives the account id and currency', () => {
+  assert.deepEqual(statementFileInfo('monthly-statement-transactions-HQ4BPK105CAD-2024-09-01.csv'), { account: 'HQ4BPK105CAD', currency: 'CAD' })
+  assert.deepEqual(statementFileInfo('monthly-statement-transactions-AB1234567USD-2024-12-31 (1).csv'), { account: 'AB1234567USD', currency: 'USD' })
+  assert.equal(statementFileInfo('activities-export-2025.csv'), null)
+})
+
+test('statement: option, FX conversion and corporate action rows are skipped with a reason', () => {
+  const csv = `"date","transaction","description","amount","balance","currency"
+"2025-07-23","BUYTOOPEN","SPY 450.00 USD CALL 2025-07-25: Bought 2 contract (executed at 2025-07-23), Fee: $1.50","-320.50","1000","USD"
+"2025-07-24","STKREORG","XYZ - XYZ Corp.: Reorganization","0","1000","USD"
+"2025-07-25","BUY","AAPL - Apple Inc.: Bought 2.5000 shares (executed at 2025-07-24), FX Rate: 1.3712","-532.50","467.50","USD"
+"2025-07-29","FXCONVERSION","Convert USD (executed at 2025-07-29) - $1USD = $1.35CAD","-100","367.50","USD"
+`
+  const rows = parseCsv(csv)
+  const { txs, skipped } = importStatement(rows, opts)
+  assert.equal(txs.length, 1)
+  assert.deepEqual([txs[0].date, txs[0].quantity, txs[0].price, txs[0].currency], ['2025-07-24', 2.5, 213, 'USD'])
+  assert.deepEqual(skipped.map((s) => s.reason.split(' ')[0]), ['option', 'corporate', 'not'])
 })

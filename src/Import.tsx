@@ -1,6 +1,6 @@
 import { useMemo, useState, type DragEvent } from 'react'
 import { ACCOUNT_TYPES, KIND_LABEL, cad, type AccountType, type Currency, type Tx } from './engine.ts'
-import { autoMap, detectFormat, FIELDS, importRows, importStatement, parseCsv, TEMPLATE_EXAMPLE, txKey, type Field, type Mapping } from './csv.ts'
+import { autoMap, detectFormat, FIELDS, importRows, importStatement, parseCsv, statementFileInfo, TEMPLATE_EXAMPLE, txKey, type Field, type Mapping } from './csv.ts'
 import { download, shares } from './ui.tsx'
 
 const FORMAT_LABEL = {
@@ -79,9 +79,11 @@ export function ImportReview({ text, name, existing, onImport, onCancel }: { tex
   const headers = useMemo(() => rows[0] ?? [], [rows])
   const format = useMemo(() => detectFormat(headers), [headers])
   const [mapping, setMapping] = useState<Mapping>(() => autoMap(headers))
-  const [account, setAccount] = useState('Personal')
+  // Statement file names carry the account id and currency, so the defaults can start out right.
+  const fileInfo = useMemo(() => statementFileInfo(name), [name])
+  const [account, setAccount] = useState(fileInfo?.account ?? 'Personal')
   const [accountType, setAccountType] = useState<AccountType>('Non-registered')
-  const [currency, setCurrency] = useState<Currency>('CAD')
+  const [currency, setCurrency] = useState<Currency>(fileInfo?.currency ?? 'CAD')
 
   const result = useMemo(() => {
     if (!rows.length) return { txs: [], skipped: [] }
@@ -175,6 +177,9 @@ export function ImportReview({ text, name, existing, onImport, onCancel }: { tex
       )}
 
       {dupes > 0 && <p className="dim">{dupes} {dupes === 1 ? 'trade is' : 'trades are'} already saved and will be left out.</p>}
+      {result.skipped.some((s) => /^(option|corporate)/.test(s.reason)) && (
+        <p className="callout warn" role="status">Some skipped rows are options or corporate actions. Those can change your share count or ACB, so open the list below and add a split or trade by hand where needed.</p>
+      )}
       {result.skipped.length > 0 && (
         <details className="skipped">
           <summary>{result.skipped.length} rows skipped (dividends, deposits and other non-trades don’t affect ACB)</summary>

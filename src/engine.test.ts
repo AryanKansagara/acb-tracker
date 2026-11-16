@@ -181,8 +181,8 @@ test('selling more than held is capped and warned', () => {
 })
 
 test('tax year follows settlement date (T+1 from 2024-05-27, T+2 before)', () => {
-  assert.equal(settlementDate('2025-12-31'), '2026-01-01') // weekends only; Jan 1 holiday not modelled
-  assert.equal(settlementDate('2023-12-29'), '2024-01-02') // Friday T+2 -> Tuesday
+  assert.equal(settlementDate('2025-12-31'), '2026-01-02') // Jan 1 holiday skipped
+  assert.equal(settlementDate('2023-12-29'), '2024-01-03') // Friday T+2, Jan 1 holiday -> Wednesday
   assert.equal(settlementDate('2025-03-07'), '2025-03-10') // Friday T+1 -> Monday
   const r = computeAcb([buy('2025-01-02', 10, 10), sell('2025-12-31', 10, 20)])
   assert.equal(r.years[0].year, 2026)
@@ -382,4 +382,27 @@ test('superficial loss: pre-sale substitute shares absorb the denial on the sale
   const s = sec([buy('2025-01-02', 100, 50), buy('2025-02-20', 40, 40), sell('2025-03-03', 40, 30)])
   assert.deepEqual(s.rows.map((x) => x.kind), ['buy', 'buy', 'sell', 'superficial-adj'])
   near(s.acb, 6600 - 1200) // pool cost minus proceeds: the whole loss stays in the ACB
+})
+
+test('settlement skips year-end exchange holidays', async () => {
+  const { isYearEndHoliday } = await import('./engine.ts')
+  // 2025: Dec 25 Thu and Dec 26 Fri are both closed, so a Christmas Eve trade settles the next Monday.
+  assert.equal(settlementDate('2025-12-24'), '2025-12-29')
+  // T+1 trade on Dec 31 settles past New Year's Day: next tax year.
+  assert.equal(settlementDate('2025-12-31'), '2026-01-02')
+  assert.equal(settlementDate('2025-12-30'), '2025-12-31')
+  // 2022 (T+2): Christmas Sunday and Boxing Day Monday observed on Dec 26 and 27.
+  assert.equal(settlementDate('2022-12-23'), '2022-12-29')
+  // 2021: Christmas on Saturday, observed Mon 27 and Tue 28.
+  assert.equal(settlementDate('2021-12-24'), '2021-12-30')
+  // New Year's Day 2023 fell on a Sunday, observed Monday Jan 2.
+  assert.equal(settlementDate('2022-12-29'), '2023-01-03')
+  assert.ok(isYearEndHoliday('2022-01-03')) // Jan 1 2022 was a Saturday
+  assert.ok(!isYearEndHoliday('2024-01-02'))
+})
+
+test('year-end sale on the last T+1 day lands in the same tax year, the next day in the following one', () => {
+  const tx = (id: string, date: string, kind: 'buy' | 'sell', q: number, p: number): Tx => ({ id, date, account: 'A', accountType: 'Non-registered', symbol: 'XIC', kind, quantity: q, price: p, commission: 0, amount: 0, ratio: 1, currency: 'CAD' })
+  const r = computeAcb([tx('b', '2025-01-10', 'buy', 100, 30), tx('s1', '2025-12-30', 'sell', 10, 40), tx('s2', '2025-12-31', 'sell', 10, 40)])
+  assert.deepEqual(r.years.map((y) => [y.year, Math.round(y.net)]), [[2025, 100], [2026, 100]])
 })

@@ -93,6 +93,8 @@ export function detectFormat(headers: string[]): Format {
 export function normKind(raw: string): TxKind | null {
   const s = raw.trim().toLowerCase()
   if (!s) return null
+  // Option legs (BUYTOOPEN, SELL_TO_CLOSE, ...) start with buy/sell but aren't share trades.
+  if (/to[ _]?open|to[ _]?close|option|assign|exercis|expir/.test(s)) return null
   if ((TX_KINDS as readonly string[]).includes(s)) return s as TxKind
   if (/^(buy|bought|purchase|achat|drip|reinvest(ed)?_?dividend|reinvestment|b)$/.test(s) || s.startsWith('buy')) return 'buy'
   if (/^(sell|sold|sale|vente|s)$/.test(s) || s.startsWith('sell')) return 'sell'
@@ -174,7 +176,7 @@ export function importRows(rows: string[][], mapping: Mapping, opts: ImportOptio
     if (kind === 'reinvest' && Math.abs(quantity) > 0) kind = 'buy' // a DRIP that delivered shares is a purchase
     if (!kind && mapping.type == null && quantity) kind = quantity > 0 ? 'buy' : 'sell'
     const symbol = get(r, 'symbol').toUpperCase()
-    if (!kind) return skipped.push({ line, reason: `not a trade (${get(r, 'type') || 'no type'})` })
+    if (!kind) return skipped.push({ line, reason: skipReason(get(r, 'type') || get(r, 'activity')) })
     if (!date) return skipped.push({ line, reason: `unreadable date "${get(r, 'date')}"` })
     if (!symbol) return skipped.push({ line, reason: 'no symbol' })
     quantity = Math.abs(quantity || 0)
@@ -213,6 +215,20 @@ export function importRows(rows: string[][], mapping: Mapping, opts: ImportOptio
   return { txs, skipped }
 }
 
+/** Why a row was left out, worded so corporate actions and options don't vanish silently. */
+export function skipReason(type: string): string {
+  const t = type.trim()
+  if (/to[ _]?open|to[ _]?close|option|assign|exercis|expir/i.test(t)) return `option trade (${t}); options aren't tracked, enter the shares by hand if you were assigned`
+  if (/^stk|corporate|reorg|merger|spin|distribution_in_kind/i.test(t)) return `corporate action (${t}); check whether it changed your share count or ACB and add a split or trade by hand`
+  return `not a trade (${t || 'no type'})`
+}
+
+/** Wealthsimple names statement files monthly-statement-transactions-<account id><CAD|USD>-<period>.csv. */
+export function statementFileInfo(name: string): { account: string; currency: Currency } | null {
+  const m = name.match(/statement-transactions-([A-Z0-9]+?)(CAD|USD)-\d{4}-\d{2}-\d{2}/i)
+  return m ? { account: m[1].toUpperCase() + m[2].toUpperCase(), currency: m[2].toUpperCase() as Currency } : null
+}
+
 // Monthly statement lines look like:
 // "AAPL - Apple Inc.: Bought 10.0000 shares (executed at 2024-01-15), FX Rate: 1.3456"
 const STATEMENT_RE = /^\s*([A-Z0-9.\-]+)\s*-\s*(.+?):\s*(Bought|Sold)\s+([\d.,]+)\s+shares?(?:\s*\(executed at (\d{4}-\d{2}-\d{2})\))?/i
@@ -226,7 +242,7 @@ export function importStatement(rows: string[][], opts: ImportOptions): ImportRe
   rows.slice(1).forEach((r, i) => {
     const line = i + 2
     const type = (r[cType] ?? '').trim().toUpperCase()
-    if (type !== 'BUY' && type !== 'SELL') return skipped.push({ line, reason: `not a trade (${type || 'blank'})` })
+    if (type !== 'BUY' && type !== 'SELL') return skipped.push({ line, reason: type ? skipReason(type) : 'not a trade (blank)' })
     const m = (r[cDesc] ?? '').match(STATEMENT_RE)
     if (!m) return skipped.push({ line, reason: 'unrecognized description' })
     const quantity = parseNum(m[4])

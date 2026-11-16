@@ -146,15 +146,30 @@ const toMs = (d: string) => Date.parse(d + 'T00:00:00Z')
 const fromMs = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 export const addDays = (d: string, n: number) => fromMs(toMs(d) + n * DAY)
 
+/** Year-end exchange holidays: Christmas, Boxing Day and New Year's Day, with their weekday observances. */
+export function isYearEndHoliday(d: string): boolean {
+  const [y, m, day] = d.split('-').map(Number)
+  const wd = new Date(toMs(d)).getUTCDay()
+  if (m === 1) return day === 1 || (wd === 1 && (day === 2 || day === 3)) // a weekend New Year's Day moves to Monday
+  if (m !== 12 || day < 25 || day > 28) return false
+  if (day === 25 || day === 26) return true
+  // Dec 25 on Sat: Mon 27 and Tue 28 off. Dec 25 on Sun: Mon 26 and Tue 27 off. Dec 26 on Sat: Mon 28 off.
+  const xmas = new Date(Date.UTC(y, 11, 25)).getUTCDay()
+  if (xmas === 6) return day === 27 || day === 28
+  if (xmas === 0) return day === 27
+  if (xmas === 5) return day === 28
+  return false
+}
+
 /** Settlement date: T+2 business days, T+1 for trades on/after 2024-05-27 (Canadian move to T+1). */
 export function settlementDate(trade: string): string {
-  // Skips weekends only, not exchange holidays; matters only for the last days of December.
+  // Skips weekends and the year-end holidays, the only ones that can move a sale between tax years.
   let left = trade >= '2024-05-27' ? 1 : 2
   let d = trade
   while (left > 0) {
     d = addDays(d, 1)
     const wd = new Date(toMs(d)).getUTCDay()
-    if (wd !== 0 && wd !== 6) left--
+    if (wd !== 0 && wd !== 6 && !isYearEndHoliday(d)) left--
   }
   return d
 }
