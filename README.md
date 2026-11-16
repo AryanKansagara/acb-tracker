@@ -2,7 +2,7 @@
 
 Adjusted cost base and capital gains calculator for Canadian Wealthsimple investors. It runs entirely in your browser: trades live in local storage, nothing is uploaded, and there is no account.
 
-Live: LIVE_URL
+Live: https://acb-tracker-three.vercel.app (how it works and sources: https://acb-tracker-three.vercel.app/docs)
 
 ## The pain
 
@@ -10,12 +10,14 @@ Your broker's book value stops at the edge of one account, but CRA averages cost
 
 ## Features
 
-- Imports Wealthsimple Activities exports (English and French) and monthly statement CSVs, a generic template, or any CSV through a column-mapping step. Plus manual entry.
+- Imports Wealthsimple Activities exports (older and newer layouts, English and French) and monthly statement CSVs (account and currency read from the file name), a generic template, or any CSV through a column-mapping step. Plus manual entry.
 - One ACB pool per security across non-registered accounts. TFSA, RRSP and FHSA holdings are shown, excluded from ACB, and still count for the superficial loss rule.
 - Commissions, return of capital, reinvested distributions, splits and consolidations, and negative ACB deemed gains.
 - Superficial losses with min(S, P, B) / S pro-rating, split-aware share counts, and denied amounts added to the ACB of substitute shares or flagged as lost when the shares are in a registered account.
 - USD converted at the Bank of Canada daily rate for each trade date, cached, rolling weekends and holidays to the prior business day.
 - A ledger for every security, Schedule 3 per tax year (by settlement date), plain-language superficial loss explanations, charts, CSV exports and a print report.
+- Option legs and corporate actions in an export are flagged, never read as share trades.
+- Settlement dates skip weekends and the year-end exchange holidays, so late-December sales land in the right tax year.
 - Light and dark themes. Clear all data with one button.
 
 Not tax advice. It estimates from what you enter; check your slips and ask a professional before filing.

@@ -4,6 +4,7 @@ import '@fontsource-variable/newsreader/opsz.css'
 import '@fontsource-variable/newsreader/opsz-italic.css'
 import '@fontsource-variable/instrument-sans/wght.css'
 import './styles.css'
+import Docs from './Docs.tsx'
 import Landing from './Landing.tsx'
 import { usePath } from './ui.tsx'
 
@@ -17,6 +18,7 @@ function App() {
         <Tool />
       </Suspense>
     )
+  if (path === '/docs' || path.startsWith('/docs/')) return <Docs />
   return <Landing />
 }
 

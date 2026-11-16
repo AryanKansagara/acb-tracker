@@ -380,3 +380,12 @@ path.bar-loss { fill: var(--c3); }
   .report tr { break-inside: avoid; }
   .report .disclaimer { border: 1px solid #888; padding: 6pt 8pt; max-width: none; font-size: 9pt; }
 }
+
+/* docs */
+.docs { max-width: 46rem; margin: 0 auto; padding: 24px clamp(20px, 4vw, 56px) 64px; display: grid; gap: 16px; line-height: 1.6; color: var(--ink2); }
+.docs h1 { color: var(--ink); margin-bottom: 8px; }
+.docs h2 { font: 400 1.5rem/1.2 var(--serif); color: var(--ink); margin-top: 20px; }
+.docs ul { margin: 0; padding-left: 1.2em; display: grid; gap: 10px; }
+.docs b { color: var(--ink); font-weight: 600; }
+.docs code { font-size: 0.85em; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1px 5px; overflow-wrap: anywhere; }
+.docs .dim { color: var(--muted); font-size: 0.9375rem; }
