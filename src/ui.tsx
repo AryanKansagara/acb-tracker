@@ -73,7 +73,7 @@ export const Disclaimer = () => (
 export const Footer = () => (
   <footer className="footer">
     <Disclaimer />
-    <p>Built by Aryan Kansagara. Independent project, not affiliated with Wealthsimple. <Link to="/docs">How it works and sources</Link></p>
+    <p>Built by Aryan Kansagara. <Link to="/docs">How it works and sources</Link></p>
   </footer>
 )
 
