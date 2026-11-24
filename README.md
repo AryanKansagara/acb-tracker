@@ -13,7 +13,7 @@ Your broker's book value stops at the edge of one account, but CRA averages cost
 - Imports Wealthsimple Activities exports (older and newer layouts, English and French) and monthly statement CSVs (account and currency read from the file name), a generic template, or any CSV through a column-mapping step. Plus manual entry.
 - One ACB pool per security across non-registered accounts. TFSA, RRSP and FHSA holdings are shown, excluded from ACB, and still count for the superficial loss rule.
 - Commissions, return of capital, reinvested distributions, splits and consolidations, and negative ACB deemed gains.
-- Superficial losses with min(S, P, B) / S pro-rating, split-aware share counts, and denied amounts added to the ACB of substitute shares or flagged as lost when the shares are in a registered account. When several losing sales count the same replacement shares, the sources don't say how to match them: the figures stay as computed and each sale is warned with both readings.
+- Superficial losses with min(S, P, B) / S pro-rating, split-aware share counts, and denied amounts added to the ACB of substitute shares or flagged as lost when the shares are in a registered account. When several losing sales count the same replacement shares, the sources we found don't say how to match them: the figures stay as computed and each sale is warned with both readings.
 - USD converted at the Bank of Canada daily rate for each trade date, cached, rolling weekends and holidays to the prior business day.
 - A ledger for every security, Schedule 3 per tax year (by settlement date), plain-language superficial loss explanations, charts, CSV exports and a print report.
 - Option legs and corporate actions in an export are flagged, never read as share trades.

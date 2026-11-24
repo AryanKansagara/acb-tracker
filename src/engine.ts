@@ -86,7 +86,7 @@ export interface SuperficialEvent {
 }
 
 /**
- * The sources don't say how one acquisition is matched when several loss sales share it, so `denied` keeps testing each sale on
+ * The sources we found don't say how one acquisition is matched when several loss sales share it, so `denied` keeps testing each sale on
  * its own and this shows the other reading beside it: each replacement share matched to one sale only, earliest sale first.
  */
 export interface SharedReplacement {
@@ -368,10 +368,10 @@ function flagSharedReplacements(items: SaleEvent[], sorted: Tx[], warn: (date: s
         `Shared replacement shares: the shares bought on ${sh.boughtDates.join(', ')} also count for the loss ${others.length === 1 ? 'sale' : 'sales'} on ${sh.withDates.join(', ')}. ` +
         `Tested on its own this sale is denied ${cad(ev.denied)}; if each replacement share is matched to one sale only (earliest sale first) it is denied ${cad(sh.deniedOnce)}. ` +
         `Together these sales are denied ${cad(groupDenied)} as computed, or ${cad(groupOnce)} matched once. ` +
-        `The Income Tax Act and CRA letters don't say which applies, so the ledger uses the first. Ask a tax professional.`
+        `The Income Tax Act definition and the CRA letters we found don't say which applies, so the ledger uses the first. Ask a tax professional.`
       ev.explanation += ' ' + note
       row.explanation = ev.explanation
-      const text = `Replacement shares are shared with the loss ${others.length === 1 ? 'sale' : 'sales'} on ${sh.withDates.join(', ')}. Denied ${cad(groupDenied)} in total as computed, or ${cad(groupOnce)} if each replacement share is matched to one sale only. The rules don't settle which applies.`
+      const text = `Replacement shares are shared with the loss ${others.length === 1 ? 'sale' : 'sales'} on ${sh.withDates.join(', ')}. Denied ${cad(groupDenied)} in total as computed, or ${cad(groupOnce)} if each replacement share is matched to one sale only. The sources we found don't settle which applies.`
       row.warnings.push(text)
       warn(ev.date, text)
     }

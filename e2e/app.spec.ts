@@ -123,7 +123,7 @@ test.describe('losing sales that share replacement shares', () => {
     await expect(second).toContainText('$500.00 loss, $0.00 still claimable')
     await expect(second.locator('.formula .alt')).toContainText('If matched once$0.00')
     await expect(second).toContainText('Shared replacement shares: the shares bought on 2026-06-10 also count for the loss sale on 2026-06-01.')
-    await expect(second).toContainText("The Income Tax Act and CRA letters don't say which applies")
+    await expect(second).toContainText("The Income Tax Act definition and the CRA letters we found don't say which applies")
     await expect(articles.filter({ hasText: 'ZZSHARE, sold 2026-06-01' }).locator('.formula .alt')).toContainText('If matched once$500.00')
 
     // The same text sits under the sale in the ledger, next to the warning.
