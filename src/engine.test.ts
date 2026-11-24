@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeAcb, openLossWindows, settlementDate, splitAdjustedSeries, type Tx } from './engine.ts'
+import { addDays as addDaysTo, computeAcb, openLossWindows, settlementDate, splitAdjustedSeries, type Tx } from './engine.ts'
 import { lookupFrom } from './fx.ts'
 import { YEAR_OF_TRADES, SAMPLE_RATES } from './samples.ts'
 
@@ -281,6 +281,149 @@ test('superficial loss: pre-sale buy is restated by a split before the sale', ()
   const r = computeAcb([buy('2024-01-02', 100, 50), buy('2025-02-20', 20, 45), tx({ date: '2025-02-25', kind: 'split', ratio: 2 }), sell('2025-03-03', 100, 20)])
   near(r.superficial[0].acquired, 40)
   near(r.superficial[0].substituted, 40)
+})
+
+// ---------- superficial loss, several sales sharing replacement shares ----------
+// The Act and the CRA letters only describe one disposition, so the figures stay as tested sale by sale. A sale that shares
+// replacement shares with another one is warned, with the other reading (each replacement share matched once) beside it.
+const shareWarnings = (r: ReturnType<typeof computeAcb>) => r.warnings.filter((w) => w.text.startsWith('Replacement shares are shared'))
+
+test('shared replacement: one order of 100 is unchanged and not warned', () => {
+  const r = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 100, 10), buy('2026-06-10', 50, 10)])
+  near(r.superficial[0].denied, 500)
+  assert.equal(r.superficial[0].shared, undefined)
+  assert.equal(shareWarnings(r).length, 0)
+  near(r.years[0].net, -500)
+})
+
+test('shared replacement: two orders of 50 keep the old figures but both sales are warned with both readings', () => {
+  const r = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10), buy('2026-06-10', 50, 10)])
+  // As computed, exactly as before: each sale on its own, both denials reach the ACB.
+  assert.deepEqual(r.superficial.map((e) => e.denied), [500, 500])
+  near(r.years[0].denied, 1000)
+  near(r.years[0].net, 0)
+  near(r.securities[0].acb, 1500)
+  const [a, b] = r.superficial
+  near(a.shared?.deniedOnce, 500)
+  near(b.shared?.deniedOnce, 0)
+  near(a.shared?.groupDenied, 1000)
+  near(a.shared?.groupDeniedOnce, 500)
+  assert.deepEqual(a.shared?.withDates, ['2026-06-02'])
+  assert.deepEqual(b.shared?.withDates, ['2026-06-01'])
+  assert.deepEqual(a.shared?.boughtDates, ['2026-06-10'])
+  const w = shareWarnings(r)
+  assert.equal(w.length, 2)
+  assert.match(w[0].text, /\$1,000\.00 in total as computed, or \$500\.00 if each replacement share is matched to one sale only/)
+  assert.match(b.explanation, /bought on 2026-06-10 also count for the loss sale on 2026-06-01/)
+  assert.match(b.explanation, /denied \$500\.00; if each replacement share is matched to one sale only \(earliest sale first\) it is denied \$0\.00/)
+  // The ledger rows carry the same text, and the ledger numbers match the events.
+  const rows = r.securities[0].rows.filter((x) => x.kind === 'sell')
+  assert.deepEqual(rows.map((x) => x.denied), [500, 500])
+  assert.ok(rows.every((x) => x.explanation?.includes('Shared replacement shares') && x.warnings.length === 1))
+})
+
+test('shared replacement: sales on different days count, sales whose windows share no purchase do not', () => {
+  const far = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), buy('2026-06-10', 50, 10), sell('2026-08-20', 50, 5)])
+  assert.equal(far.superficial.length, 1)
+  assert.equal(shareWarnings(far).length, 0)
+  const near30 = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-25', 50, 10), buy('2026-06-30', 50, 10)])
+  assert.equal(shareWarnings(near30).length, 2)
+  const sameDay = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-01', 50, 10), buy('2026-06-10', 50, 10)])
+  assert.equal(shareWarnings(sameDay).length, 2)
+  near(sameDay.years[0].denied, 1000)
+})
+
+test('shared replacement: partial replacement, 30 shares for two sales of 50', () => {
+  const r = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10), buy('2026-06-10', 30, 10)])
+  assert.deepEqual(r.superficial.map((e) => e.denied), [300, 300])
+  assert.deepEqual(r.superficial.map((e) => e.shared?.deniedOnce), [300, 0])
+  near(r.superficial[0].shared?.groupDeniedOnce, 300)
+})
+
+test('shared replacement: enough shares to replace every sale means the readings agree and nothing is warned', () => {
+  const r = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10), buy('2026-06-10', 100, 10)])
+  near(r.years[0].denied, 1000)
+  assert.ok(r.superficial.every((e) => e.shared === undefined))
+  assert.equal(shareWarnings(r).length, 0)
+  const more = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10), buy('2026-06-10', 500, 10)])
+  near(more.years[0].denied, 1000)
+  assert.equal(shareWarnings(more).length, 0)
+})
+
+test('shared replacement: a TFSA repurchase keeps the permanently lost part as computed and is warned', () => {
+  const r = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10), buy('2026-06-10', 50, 10, { account: 'TFSA', accountType: 'TFSA' })])
+  assert.deepEqual(r.superficial.map((e) => [e.denied, e.deniedToAcb, e.deniedLost]), [[500, 0, 500], [500, 0, 500]])
+  near(r.securities[0].acb, 0)
+  assert.equal(shareWarnings(r).length, 2)
+  near(r.superficial[0].shared?.groupDeniedOnce, 500)
+})
+
+test('shared replacement: a replacement bought before the sales is shared too', () => {
+  const r = computeAcb([buy('2026-01-05', 100, 20), buy('2026-05-25', 50, 10), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10)])
+  assert.equal(shareWarnings(r).length, 2)
+  near(r.superficial[0].denied, (2500 / 150 - 10) * 50)
+  near(r.superficial[0].shared?.deniedOnce, r.superficial[0].denied)
+  near(r.superficial[1].shared?.deniedOnce, 0)
+})
+
+test('shared replacement: a split between the sales restates the shares before they are compared', () => {
+  // 100 bought, 50 sold, 2-for-1, 50 sold of the 100 now held, then 50 post-split shares bought.
+  const r = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), tx({ date: '2026-06-02', kind: 'split', ratio: 2 }), sell('2026-06-03', 50, 5), buy('2026-06-10', 50, 5)])
+  const [a, b] = r.superficial
+  near(a.substituted, 25) // 50 post-split shares are 25 sale-date shares
+  near(a.denied, 250)
+  near(b.substituted, 50)
+  near(b.denied, 250)
+  near(a.shared?.groupDenied, 500)
+  near(a.shared?.groupDeniedOnce, 250)
+  near(a.shared?.deniedOnce, 250)
+  near(b.shared?.deniedOnce, 0)
+})
+
+test('shared replacement: once-matched figures never exceed the loss or the as-computed figures', () => {
+  // A later sale in the window sells most of the replacement shares again, so fewer are held at the end.
+  const r = computeAcb([buy('2026-01-05', 200, 20), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10), buy('2026-06-10', 100, 10), sell('2026-06-20', 110, 10)])
+  for (const e of r.superficial) if (e.shared) {
+    assert.ok(e.shared.deniedOnce <= e.loss + 1e-9)
+    assert.ok(e.shared.groupDeniedOnce <= e.shared.groupDenied + 1e-9)
+  }
+})
+
+test('shared replacement: unreadable quantities never print a NaN warning', () => {
+  const r = computeAcb([buy('2026-01-05', 100, 20), sell('2026-06-01', 50, 10), sell('2026-06-02', 50, 10), buy('2026-06-10', Number.NaN, 10)])
+  assert.ok(r.warnings.every((w) => !w.text.includes('NaN')))
+  assert.ok(r.superficial.every((e) => e.shared === undefined))
+})
+
+test('shared replacement: warnings only add to the figures, which always reconcile with the ledger (randomised)', () => {
+  let seed = 7
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296
+  const int = (a: number, b: number) => a + Math.floor(rnd() * (b - a + 1))
+  let flagged = 0
+  for (let c = 0; c < 1500; c++) {
+    const txs: Tx[] = [buy('2026-01-05', int(50, 300), 20)]
+    for (let i = int(2, 7); i > 0; i--) {
+      const date = addDaysTo('2026-04-01', int(0, 75))
+      const reg = rnd() < 0.2 ? { account: 'TFSA', accountType: 'TFSA' as const } : {}
+      txs.push(rnd() < 0.5 ? sell(date, int(1, 80), int(5, 25)) : rnd() < 0.15 ? tx({ date, kind: 'split', ratio: rnd() < 0.5 ? 2 : 0.5 }) : buy(date, int(1, 80), int(5, 25), reg))
+    }
+    const r = computeAcb(txs)
+    const sellRows = r.securities[0].rows.filter((x) => x.kind === 'sell')
+    const lossTotal = r.superficial.reduce((a, e) => a + e.loss, 0)
+    const deniedTotal = r.superficial.reduce((a, e) => a + e.denied, 0)
+    near(sellRows.reduce((a, x) => a + (x.denied ?? 0), 0), deniedTotal, 0.01) // ledger denied = events
+    assert.ok(deniedTotal <= lossTotal + 1e-6, 'total denied never exceeds the total loss')
+    const toAcb = r.superficial.reduce((a, e) => a + e.deniedToAcb, 0)
+    const lost = r.superficial.reduce((a, e) => a + e.deniedLost, 0)
+    near(toAcb + lost, deniedTotal, 0.01)
+    for (const e of r.superficial) if (e.shared) {
+      flagged++
+      assert.ok(e.shared.deniedOnce >= -1e-9 && e.shared.deniedOnce <= e.denied + 1e-6)
+      assert.ok(e.shared.groupDeniedOnce < e.shared.groupDenied - 0.005 || e.shared.groupDeniedOnce > e.shared.groupDenied + 0.005)
+      assert.ok(r.warnings.some((w) => w.date === e.date && w.text.startsWith('Replacement shares are shared')))
+    }
+  }
+  assert.ok(flagged > 20, `expected the generator to reach shared cases, got ${flagged}`)
 })
 
 // ---------- FX ----------

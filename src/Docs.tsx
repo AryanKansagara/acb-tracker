@@ -2,6 +2,10 @@ import { useEffect } from 'react'
 import { Brand, Footer, Link, ThemeToggle } from './ui.tsx'
 
 const CRA_CG = 'https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/about-your-tax-return/tax-return/completing-a-tax-return/personal-income/line-12700-capital-gains/calculating-reporting-your-capital-gains-losses.html'
+const TI = 'https://taxinterpretations.com/cra/severed-letters/'
+const TI_2004 = TI + '2004-0073011e5'
+const TI_2005 = TI + '2005-0150811e5'
+const TI_2022 = TI + '2022-0940941c6'
 
 /** How the numbers are made and where the reference data comes from. */
 export default function Docs() {
@@ -32,6 +36,7 @@ export default function Docs() {
         <ul>
           <li><b>Average cost across accounts.</b> One ACB pool per security across all your non-registered accounts. Buys add price × quantity plus commission, and sells remove ACB × sold ÷ held. TFSA, RRSP, FHSA and other registered holdings have no ACB, but they still count for the superficial loss rule.</li>
           <li><b>Superficial losses.</b> If you or an affiliated account buys the same security in the 30 days before or after a loss sale and still holds it on day 30, the denied part is the loss × min(S, P, B) ÷ S. S is shares sold, P is shares bought in the window, and B is shares held at the end. The denied amount is added to the ACB of the substitute shares, or lost if they are in a registered account.</li>
+          <li><b>Several losing sales, one repurchase.</b> The CRA formula and its examples describe a single sale. When two loss sales have windows that count the same repurchased shares, each sale is still tested on its own, so the same shares can deny both losses and the total can exceed what one combined order would deny. The Act's definition is written per disposition and has no quantity or “used once” wording, and the CRA letters we found (<a href={TI_2004}>2004-0073011E5</a>, <a href={TI_2005}>2005-0150811E5</a>, <a href={TI_2022}>2022-0940941C6</a>) do not say how shared shares are matched. So the numbers are left as computed, and each affected sale carries a warning with both figures: as computed, and with each replacement share matched to one sale only, earliest sale first. Nothing is warned when the two readings agree, for example when enough shares were bought to replace every sale. If this applies to you, ask a tax professional how to report it.</li>
           <li><b>Return of capital</b> lowers ACB. If ACB would go below zero, the excess is a capital gain in that year and ACB resets to $0. <b>Reinvested distributions</b> (T3 box 21 phantom distributions) raise it. <b>Splits and consolidations</b> change the share count, not the ACB.</li>
           <li><b>Tax year by settlement date.</b> Canadian trades settled T+2 until 2024-05-24, and T+1 from 2024-05-27. Settlement skips weekends and the year-end exchange holidays (Christmas, Boxing Day and New Year’s Day, with their weekday observances), because those decide whether a late-December sale falls in this tax year or the next.</li>
           <li><b>Inclusion rate</b> is 50%. The proposed increase to two-thirds was cancelled in March 2025.</li>
@@ -46,6 +51,7 @@ export default function Docs() {
         <h2>References</h2>
         <ul>
           <li>CRA, <a href={CRA_CG}>Calculating and reporting your capital gains and losses</a></li>
+          <li>Income Tax Act, <a href="https://laws-lois.justice.gc.ca/eng/acts/i-3.3/section-54.html">section 54, “superficial loss”</a>, and CRA technical interpretations <a href={TI_2004}>2004-0073011E5</a> and <a href={TI_2005}>2005-0150811E5</a> (the min(S, P, B) / S formula, and B counting every identical share held), and <a href={TI_2022}>2022-0940941C6</a> (CRA roundtable, 7 October 2022), as mirrored by Tax Interpretations. These were read in November 2026.</li>
           <li>CRA guide <a href="https://www.canada.ca/en/revenue-agency/services/forms-publications/publications/t4037.html">T4037, Capital Gains</a> (ACB, superficial losses, identical properties)</li>
           <li>CRA <a href="https://www.canada.ca/en/revenue-agency/services/forms-publications/forms/5000-s3.html">Schedule 3, Capital Gains (or Losses)</a></li>
           <li>Bank of Canada <a href="https://www.bankofcanada.ca/valet/docs">Valet API documentation</a></li>
