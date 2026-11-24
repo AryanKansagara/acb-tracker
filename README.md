@@ -34,3 +34,9 @@ npm run dev
 npm test
 npm run build
 ```
+
+### End-to-end tests
+
+`npm run test:e2e` builds the app and runs the Playwright (Chromium) suite in `e2e/` against that production build, served by `vite preview` on port 4389 (set `E2E_PORT` to change it). The first time, install the browser with `npx playwright install chromium` (add `--with-deps` on a bare Linux box).
+
+The tests never touch the network. Every request that isn't the preview server is blocked and fails the test, and the Bank of Canada API is stubbed per test. An uncaught page error also fails a test. GitHub Actions runs the build, unit tests and these tests on every pull request and push to `main`.
