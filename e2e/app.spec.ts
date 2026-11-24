@@ -15,6 +15,12 @@ const USD_CSV = [
   '2025-06-16,Personal USD,Non-registered,ZZUSD,,sell,10,120,0,,,USD,,',
 ].join('\n')
 
+// 100 bought at $20, then $10 sales, then 50 bought back: one order of 100, or two orders of 50 on consecutive days.
+const SHARED_BUY = '2026-01-05,Personal,Non-registered,ZZSHARE,Synthetic Corp,buy,100,20,0,,,CAD,,'
+const SHARED_REBUY = '2026-06-10,Personal,Non-registered,ZZSHARE,,buy,50,10,0,,,CAD,,'
+const ONE_ORDER_CSV = [TEMPLATE_HEADER, SHARED_BUY, '2026-06-01,Personal,Non-registered,ZZSHARE,,sell,100,10,0,,,CAD,,', SHARED_REBUY].join('\n')
+const TWO_ORDERS_CSV = [TEMPLATE_HEADER, SHARED_BUY, '2026-06-01,Personal,Non-registered,ZZSHARE,,sell,50,10,0,,,CAD,,', '2026-06-02,Personal,Non-registered,ZZSHARE,,sell,50,10,0,,,CAD,,', SHARED_REBUY].join('\n')
+
 const RATES = { '2025-03-03': 1.3, '2025-06-16': 1.4 }
 
 const importButton = (page: import('@playwright/test').Page) => page.getByRole('button', { name: /^Import \d+ trades?$/ })
@@ -85,6 +91,52 @@ test.describe('sample data', () => {
   test('the docs page loads', async ({ page }) => {
     await page.goto('/docs')
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  })
+})
+
+test.describe('losing sales that share replacement shares', () => {
+  test('one order of 100 is denied $500 and carries no warning', async ({ page }) => {
+    await importFile(page, 'synthetic-one-order.csv', ONE_ORDER_CSV)
+    await expect(tile(page, 'Denied as superficial, all years').locator('dd')).toHaveText('$500.00')
+    await expect(page.locator('.warnings')).toHaveCount(0)
+    await page.getByRole('button', { name: /^Superficial losses/ }).click()
+    await expect(page.locator('article.sl')).toHaveCount(1)
+    await expect(page.locator('article.sl')).not.toContainText('Shared replacement shares')
+    await expect(page.locator('.formula .alt')).toHaveCount(0)
+  })
+
+  test('two orders of 50 keep the figures, warn, and show both readings', async ({ page }) => {
+    await importFile(page, 'synthetic-two-orders.csv', TWO_ORDERS_CSV)
+    // Numbers are exactly what each sale tested on its own gives.
+    await expect(tile(page, 'Denied as superficial, all years').locator('dd')).toHaveText('$1,000.00')
+    await expect(tile(page, 'ACB of shares held').locator('dd')).toHaveText('$1,500.00')
+
+    const warnings = page.locator('.warnings')
+    await expect(warnings).toContainText('2 warnings to check')
+    await warnings.locator('summary').click()
+    await expect(warnings).toContainText('Replacement shares are shared with the loss sale on 2026-06-02. Denied $1,000.00 in total as computed, or $500.00 if each replacement share is matched to one sale only.')
+
+    await page.getByRole('button', { name: /^Superficial losses/ }).click()
+    const articles = page.locator('article.sl')
+    await expect(articles).toHaveCount(2)
+    const second = articles.filter({ hasText: 'ZZSHARE, sold 2026-06-02' })
+    await expect(second).toContainText('$500.00 loss, $0.00 still claimable')
+    await expect(second.locator('.formula .alt')).toContainText('If matched once$0.00')
+    await expect(second).toContainText('Shared replacement shares: the shares bought on 2026-06-10 also count for the loss sale on 2026-06-01.')
+    await expect(second).toContainText("The Income Tax Act definition and the CRA letters we found don't say which applies")
+    await expect(articles.filter({ hasText: 'ZZSHARE, sold 2026-06-01' }).locator('.formula .alt')).toContainText('If matched once$500.00')
+
+    // The same text sits under the sale in the ledger, next to the warning.
+    await second.getByRole('button', { name: 'Open ledger' }).click()
+    await expect(page.locator('tr.note').filter({ hasText: 'Shared replacement shares' })).toHaveCount(2)
+    await expect(page.locator('tr.note.warn')).toHaveCount(2)
+  })
+
+  test('the docs say what the sources settle and what they do not', async ({ page }) => {
+    await page.goto('/docs')
+    await expect(page.getByText('Several losing sales, one repurchase.')).toBeVisible()
+    await expect(page.getByRole('link', { name: '2004-0073011E5' }).first()).toHaveAttribute('href', /taxinterpretations\.com/)
+    await expect(page.getByText('Not tax advice.')).toBeVisible()
   })
 })
 

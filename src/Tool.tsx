@@ -519,6 +519,7 @@ function SuperficialView({ result, txs, onOpen }: { result: Result; txs: Tx[]; o
             <div><dt>Held on day 30 (B)</dt><dd>{shares(e.heldAtEnd)}</dd></div>
             <div><dt>min(S, P, B) ÷ S</dt><dd>{shares(e.substituted)} ÷ {shares(e.sold)}</dd></div>
             <div className="hl"><dt>Denied</dt><dd>{cad(e.denied)}</dd></div>
+            {e.shared && <div className="alt"><dt>If matched once</dt><dd>{cad(e.shared.deniedOnce)}</dd></div>}
             <div><dt>Added to ACB</dt><dd>{cad(e.deniedToAcb)}</dd></div>
             {e.deniedLost > 0.005 && <div className="lost"><dt>Lost permanently</dt><dd>{cad(e.deniedLost)}</dd></div>}
           </div>

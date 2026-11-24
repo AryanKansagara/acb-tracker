@@ -303,7 +303,7 @@ path.bar-loss { fill: var(--c3); }
 .formula { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
 .formula > div { padding: 10px 14px; border-radius: var(--r); background: var(--bg); flex: 1 1 130px; }
 .formula .hl { background: var(--lilac); }
-.formula .lost { background: var(--warn-bg); }
+.formula .lost, .formula .alt { background: var(--warn-bg); }
 .formula dt { font-size: 0.75rem; color: var(--muted); }
 .formula dd { margin: 0; font: 400 1.25rem var(--serif); font-variant-numeric: lining-nums tabular-nums; white-space: nowrap; }
 .sl > p { color: var(--ink2); max-width: 62em; }

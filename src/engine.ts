@@ -81,6 +81,20 @@ export interface SuperficialEvent {
   deniedLost: number
   substituteHeld: boolean // non-registered substitute shares were already acquired by the sale date
   explanation: string
+  /** Set when other loss sales count some of the same replacement shares and the readings of the rule disagree. */
+  shared?: SharedReplacement
+}
+
+/**
+ * The sources we found don't say how one acquisition is matched when several loss sales share it, so `denied` keeps testing each sale on
+ * its own and this shows the other reading beside it: each replacement share matched to one sale only, earliest sale first.
+ */
+export interface SharedReplacement {
+  withDates: string[] // the other loss sales that count some of the same replacement shares
+  boughtDates: string[] // purchase dates of the replacement shares counted by more than one of these sales
+  deniedOnce: number // this sale's denial if each replacement share is matched to one sale only
+  groupDenied: number // all of these sales together, each tested on its own (what the ledger uses)
+  groupDeniedOnce: number // all of these sales together, each replacement share matched once
 }
 
 export interface RegisteredHolding {
@@ -191,6 +205,17 @@ export function sortTxs(txs: Tx[]): Tx[] {
     .map((x) => x.t)
 }
 
+/** Product of the split ratios dated after `from` up to and including `to`. */
+const splitFactorOf = (sorted: Tx[], from: string, to: string) =>
+  sorted.reduce((f, t) => (t.kind === 'split' && t.date > from && t.date <= to && t.ratio > 0 ? f * t.ratio : f), 1)
+
+/** A replacement purchase counted by a loss sale; `units` are today's shares so lots can be compared between sales. */
+interface Lot {
+  index: number // position in the sorted trades
+  date: string
+  units: number
+}
+
 /** Shares held of one security per account at end of `date` (inclusive), all accounts. */
 function holdingsAt(sorted: Tx[], date: string): Map<string, { type: AccountType; shares: number }> {
   const pos = new Map<string, { type: AccountType; shares: number }>()
@@ -215,18 +240,19 @@ function holdingsAt(sorted: Tx[], date: string): Map<string, { type: AccountType
  * 30 days before or after the sale and still held at day +30. Denied = loss x min(S, P, B) / S.
  * The part matched to registered accounts can't be added to any ACB and is lost for good.
  */
-function superficial(sorted: Tx[], sale: Tx, loss: number): SuperficialEvent | undefined {
+function superficial(sorted: Tx[], sale: Tx, loss: number, lots: Lot[]): SuperficialEvent | undefined {
   const start = addDays(sale.date, -30)
   const end = addDays(sale.date, 30)
   // S, P and B must share a unit, so everything is restated in shares as of the sale date.
-  const splitFactor = (from: string, to: string) =>
-    sorted.reduce((f, t) => (t.kind === 'split' && t.date > from && t.date <= to && t.ratio > 0 ? f * t.ratio : f), 1)
+  const splitFactor = (from: string, to: string) => splitFactorOf(sorted, from, to)
+  const toToday = splitFactor(sale.date, '9999-12-31')
   let acquired = 0
   let acquiredReg = 0
   let acquiredByNow = 0
-  for (const t of sorted) {
+  for (const [index, t] of sorted.entries()) {
     if (t.kind !== 'buy' || t.date < start || t.date > end) continue
     const units = t.date <= sale.date ? t.quantity * splitFactor(t.date, sale.date) : t.quantity / splitFactor(sale.date, t.date)
+    lots.push({ index, date: t.date, units: units * toToday })
     acquired += units
     if (isRegistered(t.accountType)) acquiredReg += units
     else if (t.date <= sale.date) acquiredByNow += units
@@ -275,6 +301,83 @@ function superficial(sorted: Tx[], sale: Tx, loss: number): SuperficialEvent | u
   }
 }
 
+/** A losing sale that was caught by the rule, with the replacement purchases it counted and its ledger row. */
+interface SaleEvent {
+  ev: SuperficialEvent
+  lots: Lot[]
+  row: LedgerRow
+}
+
+/**
+ * Loss sales that count the same replacement purchase are each denied in full when each is tested on its own, so the same
+ * shares can deny more than one loss. The Act and the CRA letters only describe a single disposition, so the figures are left
+ * as computed. Where the other reading (each replacement share matched to one sale only, earliest sale first, and never more
+ * than the shares held at the end) gives a different total, every sale involved gets both figures in its explanation and a warning.
+ */
+function flagSharedReplacements(items: SaleEvent[], sorted: Tx[], warn: (date: string, text: string) => void) {
+  // Sales are linked when they count one purchase in common; groups are the connected sets.
+  const group = items.map((_, i) => i)
+  const find = (i: number): number => (group[i] === i ? i : (group[i] = find(group[i])))
+  const owner = new Map<number, number>()
+  items.forEach((it, i) => {
+    for (const lot of it.lots) {
+      const o = owner.get(lot.index)
+      if (o === undefined) owner.set(lot.index, i)
+      else group[find(i)] = find(o)
+    }
+  })
+  const groups = new Map<number, number[]>()
+  items.forEach((_, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), i]))
+
+  for (const members of groups.values()) {
+    if (members.length < 2) continue
+    const toToday = (i: number) => splitFactorOf(sorted, items[i].ev.date, '9999-12-31')
+    const used = new Map<number, number>()
+    let room = Math.max(...members.map((i) => items[i].ev.heldAtEnd * toToday(i)))
+    const once = new Map<number, number>()
+    for (const i of members) {
+      const { ev, lots } = items[i]
+      const free = lots.map((l) => ({ l, left: Math.max(0, l.units - (used.get(l.index) ?? 0)) }))
+      let matched = Math.max(0, Math.min(ev.substituted * toToday(i), free.reduce((a, f) => a + f.left, 0), room))
+      once.set(i, (ev.loss * matched) / (ev.sold * toToday(i)))
+      room -= matched
+      for (const f of free) {
+        const take = Math.min(f.left, matched)
+        used.set(f.l.index, (used.get(f.l.index) ?? 0) + take)
+        matched -= take
+      }
+    }
+    const groupDenied = members.reduce((a, i) => a + items[i].ev.denied, 0)
+    const groupOnce = members.reduce((a, i) => a + (once.get(i) ?? 0), 0)
+    // Unreadable quantities produce non-finite figures: say nothing rather than print them.
+    if (!Number.isFinite(groupDenied) || !Number.isFinite(groupOnce) || Math.abs(groupDenied - groupOnce) < 0.005) continue
+
+    for (const i of members) {
+      const { ev, lots, row } = items[i]
+      const others = members.filter((j) => j !== i)
+      const shared = lots.filter((l) => others.some((j) => items[j].lots.some((m) => m.index === l.index)))
+      ev.shared = {
+        withDates: [...new Set(others.map((j) => items[j].ev.date))],
+        boughtDates: [...new Set(shared.map((l) => l.date))],
+        deniedOnce: once.get(i) ?? 0,
+        groupDenied,
+        groupDeniedOnce: groupOnce,
+      }
+      const sh = ev.shared
+      const note =
+        `Shared replacement shares: the shares bought on ${sh.boughtDates.join(', ')} also count for the loss ${others.length === 1 ? 'sale' : 'sales'} on ${sh.withDates.join(', ')}. ` +
+        `Tested on its own this sale is denied ${cad(ev.denied)}; if each replacement share is matched to one sale only (earliest sale first) it is denied ${cad(sh.deniedOnce)}. ` +
+        `Together these sales are denied ${cad(groupDenied)} as computed, or ${cad(groupOnce)} matched once. ` +
+        `The Income Tax Act definition and the CRA letters we found don't say which applies, so the ledger uses the first. Ask a tax professional.`
+      ev.explanation += ' ' + note
+      row.explanation = ev.explanation
+      const text = `Replacement shares are shared with the loss ${others.length === 1 ? 'sale' : 'sales'} on ${sh.withDates.join(', ')}. Denied ${cad(groupDenied)} in total as computed, or ${cad(groupOnce)} if each replacement share is matched to one sale only. The sources we found don't settle which applies.`
+      row.warnings.push(text)
+      warn(ev.date, text)
+    }
+  }
+}
+
 export function computeAcb(txs: Tx[], fxLookup: FxLookup = () => undefined): Result {
   const bySymbol = new Map<string, Tx[]>()
   for (const t of txs) {
@@ -291,6 +394,7 @@ export function computeAcb(txs: Tx[], fxLookup: FxLookup = () => undefined): Res
   for (const [symbol, list] of [...bySymbol.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const sorted = sortTxs(list)
     const rows: LedgerRow[] = []
+    const saleEvents: SaleEvent[] = []
     let shares = 0
     let acb = 0
     let realized = 0
@@ -406,10 +510,13 @@ export function computeAcb(txs: Tx[], fxLookup: FxLookup = () => undefined): Res
       let denied = 0
       let explanation: string | undefined
       let absorbNow: SuperficialEvent | undefined
+      let saleEvent: Omit<SaleEvent, 'row'> | undefined
       if (gain < -0.005) {
-        const ev = superficial(sorted, { ...t, quantity: q }, -gain)
+        const lots: Lot[] = []
+        const ev = superficial(sorted, { ...t, quantity: q }, -gain, lots)
         if (ev) {
           events.push(ev)
+          saleEvent = { ev, lots }
           denied = ev.denied
           gain += denied
           explanation = ev.explanation
@@ -424,7 +531,7 @@ export function computeAcb(txs: Tx[], fxLookup: FxLookup = () => undefined): Res
       const settle = settlementDate(t.date)
       realized += gain
       lines.push({ symbol, name, date: t.date, settlement: settle, quantity: q, proceeds, acb: acbSold, outlays, gain, denied, kind: 'sale' })
-      push({
+      const sellRow = push({
         id: t.id,
         tx: t,
         kind: 'sell',
@@ -443,6 +550,7 @@ export function computeAcb(txs: Tx[], fxLookup: FxLookup = () => undefined): Res
         warnings,
         explanation,
       })
+      if (saleEvent) saleEvents.push({ ...saleEvent, row: sellRow })
       if (absorbNow) {
         acb += absorbNow.deniedToAcb
         push({
@@ -459,6 +567,8 @@ export function computeAcb(txs: Tx[], fxLookup: FxLookup = () => undefined): Res
         })
       }
     }
+
+    flagSharedReplacements(saleEvents, sorted, (date, text) => allWarnings.push({ symbol, date, text }))
 
     if (pendingAdj) allWarnings.push({ symbol, date: pendingAdj.event.date, text: `Denied loss of ${cad(pendingAdj.amount)} could not be attached to a later non-registered purchase.` })
 
